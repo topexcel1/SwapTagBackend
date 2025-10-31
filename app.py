@@ -321,7 +321,7 @@ def chat():
             swap_tag=swap_tag,
             role="user",
             content=user_msg,
-            metadata=json.dumps({"source": "frontend", "received_at": int(time.time())})
+            metaData=json.dumps({"source": "frontend", "received_at": int(time.time())})
         )
         db.add(user_record)
         db.commit()
@@ -331,7 +331,7 @@ def chat():
             swap_tag=swap_tag,
             role="assistant",
             content=assistant_text,
-            metadata=json.dumps({"via": "openai" if OPENAI_API_KEY and openai else "fallback", "sent_at": int(time.time())})
+            metaData=json.dumps({"via": "openai" if OPENAI_API_KEY and openai else "fallback", "sent_at": int(time.time())})
         )
         db.add(assistant_record)
         db.commit()
@@ -370,7 +370,7 @@ def chat_history():
                 "swap_tag": m.swap_tag,
                 "role": m.role,
                 "content": m.content,
-                "metadata": (m.metadata and json.loads(m.metadata)) or None,
+                "metaData": (m.metadata and json.loads(m.metadata)) or None,
                 "timestamp": m.timestamp.strftime("%Y-%m-%d %H:%M:%S")
             }
             for m in messages
