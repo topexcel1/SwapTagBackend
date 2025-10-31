@@ -23,5 +23,5 @@ class ChatMessage(Base):
     swap_tag = Column(String, nullable=True, index=True)   # optional: connect chat to a swap_tag / user
     role = Column(String, nullable=False)                  # "user" or "assistant" or "system"
     content = Column(Text, nullable=False)
-    metadata = Column(String, nullable=True)               # short JSON string or small metadata
+    metaData = Column(String, nullable=True)               # short JSON string or small metadata
     timestamp = Column(DateTime, default=datetime.utcnow)
