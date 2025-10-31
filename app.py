@@ -280,7 +280,7 @@ def chat():
     }
     """
     payload = request.get_json() or {}
-    user_msg = payload.get("message", "")
+    user_msg = payload.get("query", "")
     swap_tag = payload.get("swap_tag")
     history = payload.get("history", [])  # optional
 
