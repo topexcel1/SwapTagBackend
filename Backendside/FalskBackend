@@ -1,0 +1,92 @@
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+import requests
+
+app = Flask(__name__)
+CORS(app, origins=["https://swaptag-fee-page.netlify.app"])
+
+# VitalSwap base API
+BASE_URL = "https://2kbbumlxz3.execute-api.us-east-1.amazonaws.com/default"
+
+# ----------------------------
+# ROUTES
+# ----------------------------
+
+@app.route("/")
+def index():
+    return jsonify({
+        "message": "VitalSwap Fee Page Backend is running",
+        "endpoints": ["/api/fees", "/api/exchange", "/api/simulate"]
+    })
+
+@app.route("/api/fees", methods=["GET"])
+def get_fees():
+    """Fetch current fees from VitalSwap API"""
+    try:
+        response = requests.get(f"{BASE_URL}/fee", timeout=8)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except Exception as e:
+        return jsonify({"error": "Failed to fetch fees", "details": str(e)}), 500
+
+
+@app.route("/api/exchange", methods=["GET"])
+def get_exchange_rate():
+    """Fetch USD↔NGN exchange rate from VitalSwap API"""
+    from_currency = request.args.get("from", "USD")
+    to_currency = request.args.get("to", "NGN")
+
+    try:
+        response = requests.get(
+            f"{BASE_URL}/exchange",
+            params={"from": from_currency, "to": to_currency},
+            timeout=8
+        )
+        response.raise_for_status()
+        return jsonify(response.json())
+    except Exception as e:
+        return jsonify({"error": "Failed to fetch exchange rate", "details": str(e)}), 500
+
+
+@app.route("/api/simulate", methods=["POST"])
+def simulate_transaction():
+    """
+    Combines /fee and /exchange results into one unified calculator output.
+    Expected body: { "amount": 100, "from": "USD", "to": "NGN" }
+    """
+    data = request.get_json()
+    amount = float(data.get("amount", 0))
+    from_currency = data.get("from", "USD")
+    to_currency = data.get("to", "NGN")
+
+    # Fetch current exchange rate
+    fx_res = requests.get(
+        f"{BASE_URL}/exchange", params={"from": from_currency, "to": to_currency}
+    ).json()
+    rate = fx_res.get("rate", 1)
+
+    # Example: Apply a fixed fee rule from the /fee endpoint
+    fee_data = requests.get(f"{BASE_URL}/fee").json()
+    customer_fees = fee_data.get("Customer", {}).get("products", {})
+    first_product = next(iter(customer_fees.values()))
+    first_service = first_product["services"][0]
+    percent_fee = float(first_service["rate"])
+    fixed_fee = float(first_service["min"])
+
+    total_fee = (percent_fee * amount) + fixed_fee
+    converted_amount = (amount - total_fee) * rate
+
+    return jsonify({
+        "input": {"amount": amount, "from": from_currency, "to": to_currency},
+        "exchange_rate": rate,
+        "fee_details": {
+            "percent_fee": percent_fee,
+            "fixed_fee": fixed_fee,
+            "total_fee": total_fee
+        },
+        "converted_amount": converted_amount
+    })
+
+
+if __name__ == "__main__":
+    app.run(debug=True, port=5000)

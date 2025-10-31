@@ -1,0 +1,12 @@
+Flask==2.3.4
+Flask-Cors==4.0.0
+requests==2.31.0
+python-dotenv==1.0.0
+flask
+flask-cors
+requests
+sqlalchemy
+psycopg2-binary
+python-dotenv
+openai
+gunicorn
