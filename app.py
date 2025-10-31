@@ -19,6 +19,9 @@ app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'devkey')
 ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', '*')
 CORS(app, origins=[origin.strip() for origin in ALLOWED_ORIGINS.split(',')])
 
+# Ensure DB tables exist
+Base.metaData.create_all(bind=engine)
+
 # ---------- Simple in-memory data (replace with DB for production) ----------
 # Fee plans: flexible, used by frontend to present options and by calculator
 FEES = [
@@ -209,13 +212,12 @@ try:
 except Exception:
     openai = None
 
-load_dotenv()
+#load_dotenv()
 
-app = Flask(__name__)
-CORS(app, origins=[os.getenv("ALLOWED_ORIGINS", "*")])
+#app = Flask(__name__)
+#CORS(app, origins=[os.getenv("ALLOWED_ORIGINS", "*")])
 
-# Ensure DB tables exist
-Base.metadata.create_all(bind=engine)
+
 
 # OpenAI settings (optional)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
