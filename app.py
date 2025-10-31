@@ -20,7 +20,7 @@ ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', '*')
 CORS(app, origins=[origin.strip() for origin in ALLOWED_ORIGINS.split(',')])
 
 # Ensure DB tables exist
-Base.metaData.create_all(bind=engine)
+Base.metadata.create_all(bind=engine)
 
 # ---------- Simple in-memory data (replace with DB for production) ----------
 # Fee plans: flexible, used by frontend to present options and by calculator
