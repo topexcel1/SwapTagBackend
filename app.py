@@ -8,6 +8,7 @@ import json
 from sqlalchemy.orm import Session
 from database import SessionLocal, engine, Base
 from models import Referral, ChatMessage
+from google import genai
 
 load_dotenv()
 
@@ -143,63 +144,24 @@ def exchange():
         return jsonify({"error": str(e)}), 500
 
 
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+# configure the chat backend
 
 
-# Optional OpenAI import; only used if API key is set
-try:
-    import openai
-except Exception:
-    openai = None
+# Initialize Gemini client
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
-# OpenAI settings (optional)
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # change as needed
-if OPENAI_API_KEY and openai:
-    openai.api_key = OPENAI_API_KEY
 
-# Simple safe fallback responder if no OpenAI key is available
-def fallback_respond(user_message: str, context: dict = None) -> str:
-    # Basic rule-based responses for the fee page context
-    msg = user_message.lower().strip()
-    if "fee" in msg or "fees" in msg:
-        return ("You can view current fees by clicking the fee list or using the simulator. "
-                "Try the 'Simulate' button to estimate fees for a specific swap.")
-    if "simulate" in msg or "calculator" in msg:
-        return ("Use the calculator to enter an amount, choose currencies and a plan, "
-                "then press Simulate to see fees and the converted amount.")
-    if "referral" in msg or "swaptag" in msg:
-        return ("Include your SwapTag in the simulator's referral field and we'll track conversions for your team.")
-    if "rate" in msg or "fx" in msg or "exchange" in msg:
-        return ("FX rates are available in the 'FX' dropdown. For USD→NGN, we use VitalSwap's official rates.")
-    # default
-    return ("Hi — I can answer questions about fees, the simulator, referrals, and FX rates. "
-            "Ask me something like: 'How much fee for $100 USD to NGN?'")
+def fallback_respond(message, context=None):
+    """Simple fallback if Gemini API fails."""
+    context = context or {}
+    if "fee" in message.lower():
+        return "Our current fee structure depends on transaction type and region. Please specify an amount or currency."
+    elif "exchange" in message.lower():
+        return "Exchange rates are updated frequently. You can check them using the fee simulator."
+    elif "referral" in message.lower():
+        return "You can earn bonuses by sharing your SwapTag referral link!"
+    return "I’m sorry, I couldn’t process that. Could you please rephrase your question?"
 
-def call_openai_chat(messages):
-    """
-    messages: list of dicts e.g. [{"role": "system", "content": "..."},
-                                   {"role": "user",   "content": "..."}]
-    returns assistant text
-    """
-    if not openai:
-        raise RuntimeError("OpenAI client not installed")
-    # adjust for model API differences; this uses the Chat Completions API pattern
-    resp = openai.ChatCompletion.create(
-        model=OPENAI_MODEL,
-        messages=messages,
-        max_tokens=400,
-        temperature=0.2
-    )
-    # The typical path for responses:
-    text = resp.choices[0].message.get("content", "").strip()
-    return text
-
-# -------------------------
-# Chat endpoints
-# -------------------------
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
@@ -207,51 +169,47 @@ def chat():
     POST payload:
     {
       "message": "Hello, how much fee for $100?",
-      "swap_tag": "TEAMEX",         # optional: link conversation to referral
-      "history": [                  # optional: past messages to provide context (list of {role,content})
+      "swap_tag": "TEAMEX",
+      "history": [
          {"role":"user","content":"..."},
          {"role":"assistant","content":"..."}
       ]
     }
     """
     payload = request.get_json() or {}
-    user_msg = payload.get("query", "")
+    user_msg = payload.get("message", "")
     swap_tag = payload.get("swap_tag")
-    history = payload.get("history", [])  # optional
+    history = payload.get("history", [])
 
     if not user_msg:
         return jsonify({"error": "message_required"}), 400
 
-    # Build conversation for model: include optional system prompt to ground behavior
-    system_prompt = {
-        "role": "system",
-        "content": (
-            "You are VitalSwap Assistant. Answer clearly and concisely about fees, FX rates, "
-            "the simulator, referral SwapTag usage, and general product questions. "
-            "If the user asks for code or direct financial advice, be clear about assumptions."
-        )
-    }
+    # Build system prompt
+    system_prompt = (
+        "You are VitalSwap Assistant. Respond clearly and concisely about fees, FX rates, "
+        "the simulator, referral SwapTag usage, and general financial product questions. "
+        "Avoid giving direct investment advice or exact rates unless provided by the system."
+    )
 
-    # Compose messages: system + history + user
-    messages = [system_prompt]
-    # Accept history if given (validate roles)
-    for item in history:
-        if item.get("role") in ("user", "assistant", "system") and item.get("content"):
-            messages.append({"role": item["role"], "content": item["content"]})
+    # Combine history + current message for context
+    conversation = system_prompt + "\n\n"
+    for h in history:
+        role = h.get("role", "user")
+        content = h.get("content", "")
+        conversation += f"{role.capitalize()}: {content}\n"
+    conversation += f"User: {user_msg}\nAssistant:"
 
-    messages.append({"role": "user", "content": user_msg})
-
-    # Try OpenAI if API key present, otherwise fallback
+    # Call Gemini API
     try:
-        if OPENAI_API_KEY and openai:
-            assistant_text = call_openai_chat(messages)
-        else:
-            assistant_text = fallback_respond(user_msg, context={"swap_tag": swap_tag})
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=conversation
+        )
+        assistant_text = response.text.strip()
     except Exception as e:
-        # On model failure, use fallback
         assistant_text = fallback_respond(user_msg, context={"error": str(e), "swap_tag": swap_tag})
 
-    # Persist both user message and assistant reply to DB
+    # Save chat to database
     db: Session = SessionLocal()
     try:
         user_record = ChatMessage(
@@ -268,7 +226,7 @@ def chat():
             swap_tag=swap_tag,
             role="assistant",
             content=assistant_text,
-            metaData=json.dumps({"via": "openai" if OPENAI_API_KEY and openai else "fallback", "sent_at": int(time.time())})
+            metaData=json.dumps({"via": "gemini", "sent_at": int(time.time())})
         )
         db.add(assistant_record)
         db.commit()
@@ -285,11 +243,6 @@ def chat():
 
 @app.route("/api/chat/history", methods=["GET"])
 def chat_history():
-    """
-    Query params:
-      - swap_tag (optional)  -> filter by swap_tag
-      - limit (optional)
-    """
     swap_tag = request.args.get("swap_tag")
     limit = int(request.args.get("limit", 200))
 
