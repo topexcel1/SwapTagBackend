@@ -177,7 +177,8 @@ def chat():
     }
     """
     payload = request.get_json() or {}
-    user_msg = payload.get("message", "")
+    user_msg = payload.get("message") or payload.get("query") or payload.get("prompt") or ""
+    #user_msg = payload.get("message", "")
     swap_tag = payload.get("swap_tag")
     history = payload.get("history", [])
 
