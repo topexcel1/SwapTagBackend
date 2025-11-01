@@ -24,168 +24,96 @@ CORS(app, origins=origins)
 # Database initialization (uncomment when models exist)
 # Base.metadata.create_all(bind=engine)
 
-BASE_URL = os.getenv("BASE_URL")  # upstream service providing /exchange and /fee
+#BASE_URL = os.getenv("BASE_URL")  # upstream service providing /exchange and /fee
 REFERRAL_BONUS_RATE = float(os.getenv("REFERRAL_BONUS_RATE", 0.10))
 FX_CACHE = {"data": {}, "timestamp": 0}
 FX_CACHE_TTL = 300  # cache TTL seconds
 
-@app.route("/")
-def home():
-    return jsonify({
-        "message": "VitalSwap Fee Backend with PostgreSQL Referral Tracking",
-        "endpoints": ["/api/fees (GET)", "/api/exchange (GET)", "/api/simulate (POST)", "/api/referrals (GET)"]
-    })
+app = Flask(__name__)
+CORS(app, origins=["https://vitalswap-fee-page.netlify.app/"])
 
+# VitalSwap base API
+BASE_URL = "https://2kbbumlxz3.execute-api.us-east-1.amazonaws.com/default"
+
+# ----------------------------
+# ROUTES
+# ----------------------------
+
+@app.route("/")
+def index():
+    return jsonify({
+        "message": "VitalSwap Fee Page Backend is running",
+        "endpoints": ["/api/fees", "/api/exchange", "/api/simulate"]
+    })
 
 @app.route("/api/fees", methods=["GET"])
 def get_fees():
-    if not BASE_URL:
-        return jsonify({"error": "BASE_URL not configured"}), 500
+    """Fetch current fees from VitalSwap API"""
     try:
-        res = requests.get(f"{BASE_URL}/fee", timeout=8)
-        res.raise_for_status()
-        return jsonify(res.json())
+        response = requests.get(f"{BASE_URL}/fee", timeout=8)
+        response.raise_for_status()
+        return jsonify(response.json())
     except Exception as e:
         return jsonify({"error": "Failed to fetch fees", "details": str(e)}), 500
 
 
 @app.route("/api/exchange", methods=["GET"])
-def post_exchange():
-    """
-    Accepts JSON:
-    {
-      "amount": 100,
-      "from": "USD",
-      "to": "NGN",
-      "swap_tag": "TEAMEX"    # optional
-    }
-    Returns JSON that matches the frontend expectations:
-    {
-      input: {...},
-      exchange_rate: 1.234,
-      fee_details: { percent_fee: 0.01, fixed_fee: 2.0, total_fee: 3.0 },
-      converted_amount: 120.00,
-      referral: {...}  # optional
-    }
-    """
-    if not BASE_URL:
-        return jsonify({"error": "BASE_URL not configured"}), 500
+def get_exchange_rate():
+    """Fetch USD↔NGN exchange rate from VitalSwap API"""
+    from_currency = request.args.get("from", "USD")
+    to_currency = request.args.get("to", "NGN")
 
-    data = request.get_json(silent=True) or {}
     try:
-        amount = float(data.get("amount", 0))
-    except (TypeError, ValueError):
-        return jsonify({"error": "Invalid amount"}), 400
+        response = requests.get(
+            f"{BASE_URL}/exchange",
+            params={"from": from_currency, "to": to_currency},
+            timeout=8
+        )
+        response.raise_for_status()
+        return jsonify(response.json())
+    except Exception as e:
+        return jsonify({"error": "Failed to fetch exchange rate", "details": str(e)}), 500
 
-    if amount <= 0:
-        return jsonify({"error": "Amount must be greater than zero"}), 400
 
+@app.route("/api/simulate", methods=["POST"])
+def simulate_transaction():
+    """
+    Combines /fee and /exchange results into one unified calculator output.
+    Expected body: { "amount": 100, "from": "USD", "to": "NGN" }
+    """
+    data = request.get_json()
+    amount = float(data.get("amount", 0))
     from_currency = data.get("from", "USD")
     to_currency = data.get("to", "NGN")
-    swap_tag = data.get("swap_tag", "N/A")
 
-    # 1) Get FX rate (cache by pair)
-    pair_key = f"{from_currency}:{to_currency}"
-    now = time.time()
-    cached = FX_CACHE["data"].get(pair_key)
-    if cached and now - FX_CACHE["timestamp"] < FX_CACHE_TTL:
-        fx_rate = cached.get("rate", 1)
-    else:
-        try:
-            fx_res = requests.get(f"{BASE_URL}/exchange", params={"from": from_currency, "to": to_currency}, timeout=8)
-            fx_res.raise_for_status()
-            fx_json = fx_res.json()
-            # Try common keys 'rate' or 'exchange_rate'
-            fx_rate = float(fx_json.get("rate") or fx_json.get("exchange_rate") or fx_json.get("value") or 1)
-            # update cache
-            FX_CACHE["data"][pair_key] = {"rate": fx_rate}
-            FX_CACHE["timestamp"] = now
-        except Exception as e:
-            return jsonify({"error": "Failed to fetch exchange rate", "details": str(e)}), 500
+    # Fetch current exchange rate
+    fx_res = requests.get(
+        f"{BASE_URL}/exchange", params={"from": from_currency, "to": to_currency}
+    ).json()
+    rate = fx_res.get("rate", 1)
 
-    # 2) Get fee config and compute fees safely
-    try:
-        fee_res = requests.get(f"{BASE_URL}/fee", timeout=8)
-        fee_res.raise_for_status()
-        fee_json = fee_res.json()
-    except Exception as e:
-        return jsonify({"error": "Failed to fetch fee config", "details": str(e)}), 500
+    # Example: Apply a fixed fee rule from the /fee endpoint
+    fee_data = requests.get(f"{BASE_URL}/fee").json()
+    customer_fees = fee_data.get("Customer", {}).get("products", {})
+    first_product = next(iter(customer_fees.values()))
+    first_service = first_product["services"][0]
+    percent_fee = float(first_service["rate"])
+    fixed_fee = float(first_service["min"])
 
-    # Attempt to pluck fee info - make parsing robust with defaults
-    percent_fee = 0.0
-    fixed_fee = 0.0
-    try:
-        # there are many fee JSON shapes; try to be resilient
-        # Example shape you had: fee_json["Customer"]["products"][...]["services"][0]
-        customer_products = fee_json.get("Customer", {}).get("products") if isinstance(fee_json, dict) else None
-        if customer_products:
-            first_product = next(iter(customer_products.values()))
-            service = first_product.get("services", [])[0]
-            percent_fee = float(service.get("rate", 0))
-            fixed_fee = float(service.get("min", 0))
-        else:
-            # Fallback: top-level keys
-            percent_fee = float(fee_json.get("percent_fee", 0) or fee_json.get("rate", 0))
-            fixed_fee = float(fee_json.get("fixed_fee", 0) or fee_json.get("min", 0))
-    except Exception:
-        percent_fee = percent_fee or 0.0
-        fixed_fee = fixed_fee or 0.0
-
-    # compute fees
     total_fee = (percent_fee * amount) + fixed_fee
-    # sanitize rounding
-    total_fee = round(total_fee, 2)
-    net_amount = max(0.0, round(amount - total_fee, 2))
-    converted_amount = round(net_amount * fx_rate, 2)
-    referral_bonus = round(total_fee * REFERRAL_BONUS_RATE, 2)
+    converted_amount = (amount - total_fee) * rate
 
-    # 3) Optionally store referral info (uncomment when DB and Referral model are available)
-    # try:
-    #     db = SessionLocal()
-    #     new_referral = Referral(
-    #         swap_tag=swap_tag,
-    #         amount=amount,
-    #         fee_collected=total_fee,
-    #         referral_bonus=referral_bonus,
-    #         from_currency=from_currency,
-    #         to_currency=to_currency,
-    #         exchange_rate=fx_rate,
-    #         converted_amount=converted_amount,
-    #     )
-    #     db.add(new_referral)
-    #     db.commit()
-    #     db.refresh(new_referral)
-    #     db.close()
-    # except Exception as e:
-    #     # do not fail the whole request for DB issues; log in real app
-    #     pass
-
-    response = {
-        "input": {"amount": amount, "from": from_currency, "to": to_currency, "swap_tag": swap_tag},
-        "exchange_rate": fx_rate,
+    return jsonify({
+        "input": {"amount": amount, "from": from_currency, "to": to_currency},
+        "exchange_rate": rate,
         "fee_details": {
             "percent_fee": percent_fee,
             "fixed_fee": fixed_fee,
             "total_fee": total_fee
         },
-        "converted_amount": converted_amount,
-        "referral": {"bonus": referral_bonus, "rate_percent": REFERRAL_BONUS_RATE * 100}
-    }
+        "converted_amount": converted_amount
+    })
 
-    return jsonify(response), 200
-
-
-@app.route("/api/referrals", methods=["GET"])
-def get_referrals():
-    # Return stored referrals if DB present; otherwise return empty structure
-    try:
-        # db = SessionLocal()
-        # records = db.query(Referral).all()
-        # db.close()
-        # For now, return empty if DB is not ready
-        return jsonify({"count": 0, "referrals": []})
-    except Exception as e:
-        return jsonify({"error": "Failed to fetch referrals", "details": str(e)}), 500
 
 # Optional OpenAI import; only used if API key is set
 try:
