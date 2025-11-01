@@ -32,8 +32,8 @@ BASE_URL = "https://2kbbumlxz3.execute-api.us-east-1.amazonaws.com/default"
 
 
 # Fee structure
-SERVICE_FEE_PERCENT = 1.5
-PRODUCT_FEE_PERCENT = 0.5
+EXCHANGE_FEE = 2
+
 
 # Cache for storing exchange rates temporarily
 CACHE = {}  # {(from, to): {"rate": <float>, "timestamp": <epoch>}}
@@ -120,7 +120,7 @@ def exchange():
             return jsonify({"error": "Exchange rate not available for this currency pair"}), 404
 
         # Calculate fees and conversion
-        total_fee_percent = SERVICE_FEE_PERCENT + PRODUCT_FEE_PERCENT
+        total_fee_percent = SERVICE_FEE
         total_fee = amount * (total_fee_percent / 100)
         net_amount = amount - total_fee
         converted_amount = net_amount * fx_rate
