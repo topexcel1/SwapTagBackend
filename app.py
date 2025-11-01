@@ -120,7 +120,7 @@ def exchange():
             return jsonify({"error": "Exchange rate not available for this currency pair"}), 404
 
         # Calculate fees and conversion
-        total_fee_percent = SERVICE_FEE
+        total_fee_percent = EXCHANGE_FEE
         total_fee = amount * (total_fee_percent / 100)
         net_amount = amount - total_fee
         converted_amount = net_amount * fx_rate
@@ -131,8 +131,7 @@ def exchange():
             "to_currency": to_currency,
             "amount": amount,
             "fx_rate": round(fx_rate, 4),
-            "service_fee": SERVICE_FEE_PERCENT,
-            "product_fee": PRODUCT_FEE_PERCENT,
+            "exchange_fee": EXCHANGE_FEE,
             "converted_amount": round(converted_amount, 2),
         }
 
