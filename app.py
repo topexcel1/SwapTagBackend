@@ -53,39 +53,39 @@ def get_fees():
         return jsonify({"error": "Failed to fetch fees", "details": str(e)}), 500
 
 
-#@app.route("/api/exchange", methods=["GET"])
-#def get_exchange_rate():
-#    """Fetch USD↔NGN exchange rate from VitalSwap API"""
-#    from_currency = request.args.get("from", "USD")
-#    to_currency = request.args.get("to", "NGN")#
-#
-#   try:
-#        response = requests.get(
-#            f"{BASE_URL}/exchange",
-#           params={"from": from_currency, "to": to_currency},
-#           timeout=8
-#        )
-#        response.raise_for_status()
-#        return jsonify(response.json())
-#    except Exception as e:
-#       return jsonify({"error": "Failed to fetch exchange rate", "details": str(e)}), 500
-
 @app.route("/api/exchange", methods=["POST"])
 def get_exchange_rate():
+    """Fetch USD↔NGN exchange rate from VitalSwap API"""
     from_currency = request.args.get("from", "USD")
-    to_currency = request.args.get("to", "NGN")
-    try:
-        response = requests.get(f"{BASE_URL}/exchange", params={"from": from_currency, "to": to_currency}, timeout=8)
+    to_currency = request.args.get("to", "NGN")#
+
+   try:
+        response = requests.get(
+            f"{BASE_URL}/exchange",
+           params={"from": from_currency, "to": to_currency},
+           timeout=8
+        )
         response.raise_for_status()
-        data = response.json()
-    except Exception:
-        # fallback local data to prevent frontend errors
-        data = {
-            "USD": {"NGN": 1480, "EUR": 0.93},
-            "NGN": {"USD": 0.0012, "EUR": 0.0011},
-            "EUR": {"USD": 1.08, "NGN": 1700}
-        }
-    return jsonify(data)
+        return jsonify(response.json())
+    except Exception as e:
+       return jsonify({"error": "Failed to fetch exchange rate", "details": str(e)}), 500
+
+#@app.route("/api/exchange", methods=["POST"])
+#def get_exchange_rate():
+#    from_currency = request.args.get("from", "USD")
+#    to_currency = request.args.get("to", "NGN")
+#    try:
+#        response = requests.get(f"{BASE_URL}/exchange", params={"from": from_currency, "to": to_currency}, timeout=8)
+#        response.raise_for_status()
+#        data = response.json()
+#    except Exception:
+#        # fallback local data to prevent frontend errors
+#        data = {
+#            "USD": {"NGN": 1480, "EUR": 0.93},
+#            "NGN": {"USD": 0.0012, "EUR": 0.0011},
+#            "EUR": {"USD": 1.08, "NGN": 1700}
+#        }
+#    return jsonify(data)
 
 
 
