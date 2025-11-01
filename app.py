@@ -30,7 +30,7 @@ FX_CACHE = {"data": {}, "timestamp": 0}
 FX_CACHE_TTL = 300  # cache TTL seconds
 
 app = Flask(__name__)
-CORS(app, origins=["https://vitalswap-fee-page.netlify.app/"])
+CORS(app, origins=["https://swaptag-fee-page.netlify.app"])
 
 # VitalSwap base API
 BASE_URL = "https://2kbbumlxz3.execute-api.us-east-1.amazonaws.com/default"
