@@ -7,5 +7,5 @@ python-dotenv
 openai
 gunicorn
 genai
-google-genai
+
 
