@@ -123,7 +123,7 @@ def exchange():
 
         # Calculate fees and conversion
         total_fee_percent = SERVICE_FEE_PERCENT + PRODUCT_FEE_PERCENT
-        total_fee = amount * (total_fee_percent / 100)
+        total_fee = 2 #amount * (total_fee_percent / 100)
         net_amount = amount - total_fee
         converted_amount = net_amount * fx_rate
 
