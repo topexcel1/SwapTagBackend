@@ -70,7 +70,7 @@ def get_fees():
 #    except Exception as e:
 #       return jsonify({"error": "Failed to fetch exchange rate", "details": str(e)}), 500
 
-@app.route("/api/exchange", methods=["GET"])
+@app.route("/api/exchange", methods=["POST"])
 def get_exchange_rate():
     from_currency = request.args.get("from", "USD")
     to_currency = request.args.get("to", "NGN")
