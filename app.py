@@ -33,7 +33,7 @@ FX_CACHE_TTL = 300  # cache TTL seconds
 def home():
     return jsonify({
         "message": "VitalSwap Fee Backend with PostgreSQL Referral Tracking",
-        "endpoints": ["/api/fees (GET)", "/api/exchange (POST)", "/api/simulate (POST)", "/api/referrals (GET)"]
+        "endpoints": ["/api/fees (GET)", "/api/exchange (GET)", "/api/simulate (POST)", "/api/referrals (GET)"]
     })
 
 
@@ -49,7 +49,7 @@ def get_fees():
         return jsonify({"error": "Failed to fetch fees", "details": str(e)}), 500
 
 
-@app.route("/api/exchange", methods=["POST"])
+@app.route("/api/exchange", methods=["GET"])
 def post_exchange():
     """
     Accepts JSON:
