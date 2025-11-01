@@ -59,7 +59,7 @@ def get_exchange_rate():
     from_currency = request.args.get("from", "USD")
     to_currency = request.args.get("to", "NGN")#
 
-   try:
+    try:
         response = requests.get(
             f"{BASE_URL}/exchange",
            params={"from": from_currency, "to": to_currency},
