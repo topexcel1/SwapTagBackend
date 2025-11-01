@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 from database import SessionLocal, engine, Base
 from models import Referral, ChatMessage
 
-
 load_dotenv()
 
 app = Flask(__name__)
@@ -31,102 +30,121 @@ CORS(app, origins=origins)
 # VitalSwap base API
 BASE_URL = "https://2kbbumlxz3.execute-api.us-east-1.amazonaws.com/default"
 
-# ----------------------------
-# ROUTES
-# ----------------------------
 
-@app.route("/")
-def index():
-    return jsonify({
-        "message": "VitalSwap Fee Page Backend is running",
-        "endpoints": ["/api/fees", "/api/exchange", "/api/simulate"]
-    })
+# Fee structure
+SERVICE_FEE_PERCENT = 1.5
+PRODUCT_FEE_PERCENT = 0.5
 
-@app.route("/api/fees", methods=["GET"])
-def get_fees():
-    """Fetch current fees from VitalSwap API"""
+# Cache for storing exchange rates temporarily
+CACHE = {}  # {(from, to): {"rate": <float>, "timestamp": <epoch>}}
+CACHE_TTL = 3600  # cache lifespan (1 hour)
+
+# Fallback static exchange rates
+FALLBACK_RATES = {
+    ("USD", "NGN"): 1480.0,
+    ("EUR", "NGN"): 1700.0,
+    ("NGN", "USD"): 0.00068,
+    ("NGN", "EUR"): 0.00059,
+    ("USD", "EUR"): 0.93,
+    ("EUR", "USD"): 1.08,
+}
+
+
+def get_cached_rate(from_currency, to_currency):
+    """Return cached rate if valid (not expired), else None."""
+    key = (from_currency, to_currency)
+    cached = CACHE.get(key)
+    if cached and (time.time() - cached["timestamp"] < CACHE_TTL):
+        return cached["rate"]
+    return None
+
+
+def set_cached_rate(from_currency, to_currency, rate):
+    """Store exchange rate in cache with current timestamp."""
+    CACHE[(from_currency, to_currency)] = {"rate": rate, "timestamp": time.time()}
+
+
+def get_live_rate(from_currency, to_currency):
+    """Fetch live rate from exchangerate.host and cache it."""
+    # Check cache first
+    cached_rate = get_cached_rate(from_currency, to_currency)
+    if cached_rate:
+        return cached_rate
+
+    # Fetch from external API
     try:
-        response = requests.get(f"{BASE_URL}/fee", timeout=8)
-        response.raise_for_status()
-        return jsonify(response.json())
-    except Exception as e:
-        return jsonify({"error": "Failed to fetch fees", "details": str(e)}), 500
+        url = f"https://api.exchangerate.host/convert?from={from_currency}&to={to_currency}"
+        response = requests.get(url, timeout=5)
+        data = response.json()
+
+        rate = None
+        if data.get("info") and "rate" in data["info"]:
+            rate = float(data["info"]["rate"])
+        elif "result" in data:
+            rate = float(data["result"])
+
+        if rate:
+            set_cached_rate(from_currency, to_currency, rate)
+        return rate
+    except Exception:
+        return None
+
+
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({"message": "SwapTag Exchange API (with caching) is running"}), 200
 
 
 @app.route("/api/exchange", methods=["POST"])
-def get_exchange_rate():
-    """Fetch USD↔NGN exchange rate from VitalSwap API"""
-    from_currency = request.args.get("from", "USD")
-    to_currency = request.args.get("to", "NGN")#
-
+def exchange():
     try:
-        response = requests.get(
-            f"{BASE_URL}/exchange",
-           params={"from": from_currency, "to": to_currency},
-           timeout=8
-        )
-        response.raise_for_status()
-        return jsonify(response.json())
+        data = request.get_json()
+        from_currency = data.get("from_currency")
+        to_currency = data.get("to_currency")
+        amount = float(data.get("amount", 0))
+
+        # Validate input
+        if not from_currency or not to_currency:
+            return jsonify({"error": "Both 'from_currency' and 'to_currency' are required"}), 400
+        if amount <= 0:
+            return jsonify({"error": "Amount must be greater than zero"}), 400
+
+        # Fetch live rate (with caching)
+        fx_rate = get_live_rate(from_currency, to_currency)
+
+        # Fallback if live rate unavailable
+        if fx_rate is None:
+            fx_rate = FALLBACK_RATES.get((from_currency, to_currency))
+
+        if fx_rate is None:
+            return jsonify({"error": "Exchange rate not available for this currency pair"}), 404
+
+        # Calculate fees and conversion
+        total_fee_percent = SERVICE_FEE_PERCENT + PRODUCT_FEE_PERCENT
+        total_fee = amount * (total_fee_percent / 100)
+        net_amount = amount - total_fee
+        converted_amount = net_amount * fx_rate
+
+        # Response object (frontend expects these fields)
+        result = {
+            "from_currency": from_currency,
+            "to_currency": to_currency,
+            "amount": amount,
+            "fx_rate": round(fx_rate, 4),
+            "service_fee": SERVICE_FEE_PERCENT,
+            "product_fee": PRODUCT_FEE_PERCENT,
+            "converted_amount": round(converted_amount, 2),
+        }
+
+        return jsonify(result), 200
+
     except Exception as e:
-       return jsonify({"error": "Failed to fetch exchange rate", "details": str(e)}), 500
-
-#@app.route("/api/exchange", methods=["POST"])
-#def get_exchange_rate():
-#    from_currency = request.args.get("from", "USD")
-#    to_currency = request.args.get("to", "NGN")
-#    try:
-#        response = requests.get(f"{BASE_URL}/exchange", params={"from": from_currency, "to": to_currency}, timeout=8)
-#        response.raise_for_status()
-#        data = response.json()
-#    except Exception:
-#        # fallback local data to prevent frontend errors
-#        data = {
-#            "USD": {"NGN": 1480, "EUR": 0.93},
-#            "NGN": {"USD": 0.0012, "EUR": 0.0011},
-#            "EUR": {"USD": 1.08, "NGN": 1700}
-#        }
-#    return jsonify(data)
+        return jsonify({"error": str(e)}), 500
 
 
-
-@app.route("/api/simulate", methods=["POST"])
-def simulate_transaction():
-    """
-    Combines /fee and /exchange results into one unified calculator output.
-    Expected body: { "amount": 100, "from": "USD", "to": "NGN" }
-    """
-    data = request.get_json()
-    amount = float(data.get("amount", 0))
-    from_currency = data.get("from", "USD")
-    to_currency = data.get("to", "NGN")
-
-    # Fetch current exchange rate
-    fx_res = requests.get(
-        f"{BASE_URL}/exchange", params={"from": from_currency, "to": to_currency}
-    ).json()
-    rate = fx_res.get("rate", 1)
-
-    # Example: Apply a fixed fee rule from the /fee endpoint
-    fee_data = requests.get(f"{BASE_URL}/fee").json()
-    customer_fees = fee_data.get("Customer", {}).get("products", {})
-    first_product = next(iter(customer_fees.values()))
-    first_service = first_product["services"][0]
-    percent_fee = float(first_service["rate"])
-    fixed_fee = float(first_service["min"])
-
-    total_fee = (percent_fee * amount) + fixed_fee
-    converted_amount = (amount - total_fee) * rate
-
-    return jsonify({
-        "input": {"amount": amount, "from": from_currency, "to": to_currency},
-        "exchange_rate": rate,
-        "fee_details": {
-            "percent_fee": percent_fee,
-            "fixed_fee": fixed_fee,
-            "total_fee": total_fee
-        },
-        "converted_amount": converted_amount
-    })
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
 
 
 # Optional OpenAI import; only used if API key is set
@@ -134,13 +152,6 @@ try:
     import openai
 except Exception:
     openai = None
-
-#load_dotenv()
-
-#app = Flask(__name__)
-#CORS(app, origins=[os.getenv("ALLOWED_ORIGINS", "*")])
-
-
 
 # OpenAI settings (optional)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
